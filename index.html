@@ -48,6 +48,7 @@ footer{color:#5c5648;font-size:.88rem;padding:0 16px 40px;max-width:1020px;margi
 <main>
 <section class="card wallet">
 <div>הנקודות שלי: <strong id="points">—</strong></div>
+<span class="muted small">נקודה = שקל לצורך המשחק.</span>
 <div class="muted" id="stats"></div>
 <button class="secondary" onclick="resetGame()">איפוס משחק</button>
 </section>
@@ -59,6 +60,7 @@ footer{color:#5c5648;font-size:.88rem;padding:0 16px 40px;max-width:1020px;margi
 <button id="layerHeat" onclick="setLayer('heat')">מפת חום מחירים</button>
 <button id="layerMovers" onclick="setLayer('movers')">עולים / יורדים</button>
 </div>
+<p class="muted small" id="layerStatus"></p>
 <div id="map"></div>
 <p class="muted small">סיכות הדמו ממוקמות ברמת שכונה, לא בכתובת מדויקת — זה כלל הפרטיות של המוצר. סיכה מדויקת תופיע רק בהסכמה מפורשת של בעל הנכס.</p>
 </section>
@@ -108,10 +110,10 @@ footer{color:#5c5648;font-size:.88rem;padding:0 16px 40px;max-width:1020px;margi
 <section class="card">
 <h2 style="margin-top:0">איך זה עובד</h2>
 <ul>
-<li><strong>1,000 טוקנים לדירה, לא יותר.</strong> מחיר הטוקן מתחיל בעוגן, וכל קנייה מעלה אותו: מחיר = עוגן × (1 + 0.001 × טוקנים שנמכרו נטו). רוצה לקנות? אתה מעלה את המחיר.</li>
+<li><strong>1,000 טוקנים לדירה, לא יותר — וכל טוקן הוא 1/1000 משווי הדירה.</strong> מחיר הטוקן מתחיל ב־1/1000 מהעוגן (כלומר: 1,000 טוקנים = הדירה כולה), וכל קנייה מעלה אותו: מחיר טוקן = (עוגן / 1,000) × (1 + 0.001 × טוקנים שנמכרו נטו). רוצה לקנות? אתה מעלה את המחיר.</li>
 <li><strong>שורט</strong> = מכירת טוקנים שאין לך. אם המחיר יורד — הרווחת. מוגבל ל־100 טוקנים לדירה, כמו לונג.</li>
 <li><strong>עמלה 1%</strong> על כל עסקה: 50% פלטפורמה, 30% בעל הנכס, 20% קרן נזילות.</li>
-<li><strong>יישוב:</strong> כשהדירה נמכרת באמת, כל טוקן משלם את מחיר המכירה. בינתיים אין תפוגה — זה ה־perpetual.</li>
+<li><strong>יישוב:</strong> כשהדירה נמכרת באמת, כל טוקן משלם 1/1000 ממחיר המכירה. בינתיים אין תפוגה — זה ה־perpetual.</li>
 <li><strong>המודל העסקי:</strong> המשחק אוסף דאטה — מה הקהל חשב שדירה שווה, בכל רגע, לפני המכירה. הדאטה הזו (קהל מול מנוע מול מציאות) היא הנכס שמממן את האתר.</li>
 </ul>
 <details><summary>מה דמו כאן ומה אמיתי</summary>
@@ -151,8 +153,11 @@ function load(){
   }
 }
 function save(){ localStorage.setItem(LS, JSON.stringify(S)); }
-function price(p){ return Math.round(p.anchor * (1 + STEP * p.n)); }
+// טוקן אחד = 1/1000 משווי הדירה — אחרת ארנק של 100,000 נקודות לא יכול לקנות טוקן של דירה במיליונים
+function price(p){ return Math.round((p.anchor / SUPPLY) * (1 + STEP * p.n)); }
+function impliedValue(p){ return price(p) * SUPPLY; }
 function fmt(n){ return "₪" + Math.round(n).toLocaleString("he-IL"); }
+function fmtPts(n){ return Math.round(n).toLocaleString("he-IL") + " נקודות"; }
 function prop(id){ return S.props.find(p=>p.id===id); }
 let selected = null, map, layerPins, layerHeat, layerMovers, currentLayer = "pins";
 </script>
@@ -168,22 +173,22 @@ function doTrade(kind){
   else if(kind === "buy"){
     if(pos.long + qty > CAP){ ok = false; msg = "מעל תקרת הפוזיציה: מקסימום 100 טוקנים לדירה."; }
     else if(p.n + qty > SUPPLY){ ok = false; msg = "נגמר ההיצע הראשוני — אפשר לקנות רק ממי שמוכר (בדמו: ההיצע מלא)."; }
-    else if(S.points < notional + fee){ ok = false; msg = "אין מספיק נקודות (צריך " + fmt(notional + fee) + ")."; }
-    else { S.points -= notional + fee; pos.long += qty; p.n += qty; msg = "קנית " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmt(fee) + " (50% פלטפורמה, 30% בעלים, 20% קרן)."; }
+    else if(S.points < notional + fee){ ok = false; msg = "אין מספיק נקודות (צריך " + fmtPts(notional + fee) + ")."; }
+    else { S.points -= notional + fee; pos.long += qty; p.n += qty; msg = "קנית " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmtPts(fee) + " (50% פלטפורמה, 30% בעלים, 20% קרן)."; }
   } else if(kind === "sell"){
     if(pos.long < qty){ ok = false; msg = "אין לך מספיק לונג למכור (" + pos.long + " בלבד)."; }
-    else { S.points += notional - fee; pos.long -= qty; p.n -= qty; msg = "מכרת " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmt(fee) + "."; }
+    else { S.points += notional - fee; pos.long -= qty; p.n -= qty; msg = "מכרת " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmtPts(fee) + "."; }
   } else if(kind === "short"){
     if(pos.short + qty > CAP){ ok = false; msg = "מעל תקרת השורט: מקסימום 100 טוקנים לדירה."; }
     else if(p.n - qty < -500){ ok = false; msg = "השורט חורג ממגבלת העקומה."; }
-    else { S.points += notional - fee; pos.short += qty; p.n -= qty; msg = "פתחת שורט על " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. אם המחיר יירד — תרוויח. עמלה: " + fmt(fee) + "."; }
+    else { S.points += notional - fee; pos.short += qty; p.n -= qty; msg = "פתחת שורט על " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. אם המחיר יירד — תרוויח. עמלה: " + fmtPts(fee) + "."; }
   } else if(kind === "cover"){
     if(pos.short < qty){ ok = false; msg = "אין לך מספיק שורט לסגור (" + pos.short + " בלבד)."; }
-    else if(S.points < notional + fee){ ok = false; msg = "אין מספיק נקודות לסגירת השורט (צריך " + fmt(notional + fee) + ")."; }
-    else { S.points -= notional + fee; pos.short -= qty; p.n += qty; msg = "סגרת שורט על " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmt(fee) + "."; }
+    else if(S.points < notional + fee){ ok = false; msg = "אין מספיק נקודות לסגירת השורט (צריך " + fmtPts(notional + fee) + ")."; }
+    else { S.points -= notional + fee; pos.short -= qty; p.n += qty; msg = "סגרת שורט על " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmtPts(fee) + "."; }
   }
   if(ok){
-    p.peak = Math.max(p.peak, price(p));
+    p.peak = Math.max(p.peak, p.n);
     p.hist.push({ t: Date.now(), price: price(p) });
     if(p.hist.length > 60) p.hist.shift();
     p.ownerFees += Math.round(fee * 0.3);
@@ -198,13 +203,13 @@ function selectProp(id){
   document.getElementById("tradeCard").style.display = "block";
   document.getElementById("tradeTitle").textContent = p.city + " — " + p.hood + " (" + p.rooms + " חדרים, " + p.sqm + " מ״ר)";
   document.getElementById("tradeMeta").textContent =
-    "מחיר חי: " + fmt(price(p)) + " · עוגן: " + fmt(p.anchor) + (p.live ? " (עוגן חי מהמנוע)" : " (דמו)") +
+    "מחיר טוקן: " + fmt(price(p)) + " · שווי דירה משתמע: " + fmt(impliedValue(p)) + " · עוגן: " + fmt(p.anchor) + (p.live ? " (עוגן חי מהמנוע)" : " (דמו)") +
     " · טוקנים שנמכרו נטו: " + p.n + " מתוך " + SUPPLY +
     (p.mine ? " · דירה שרשמת — מסחר חסום" : "");
   const pos = S.pos[id] || { long: 0, short: 0 };
   document.getElementById("posLine").textContent =
     "הפוזיציה שלך: לונג " + pos.long + " · שורט " + pos.short +
-    " · הצטבר לבעלים מעמלות (דמו): " + fmt(p.ownerFees);
+    " · הצטבר לבעלים מעמלות (דמו): " + fmtPts(p.ownerFees);
   const hist = p.hist.length > 1 ? p.hist : [{ t: 0, price: p.anchor }, { t: 1, price: price(p) }];
   const w = 560, h = 60, vals = hist.map(x=>x.price);
   const mn = Math.min(...vals), mx = Math.max(...vals), rg = (mx - mn) || 1;
@@ -216,7 +221,7 @@ function selectProp(id){
 }
 function chg(a, b){ const d = Math.round((a-b)/b*1000)/10; return (d>=0?"+":"") + d + "%"; }
 function renderWallet(){
-  document.getElementById("points").textContent = fmt(S.points);
+  document.getElementById("points").textContent = fmtPts(S.points);
   document.getElementById("stats").textContent = "עסקאות שביצעת: " + S.trades + " · דירות במשחק: " + S.props.length;
 }
 function renderList(){
@@ -226,7 +231,7 @@ function renderList(){
     const cls = pr > p.anchor ? "up" : pr < p.anchor ? "down" : "muted";
     return '<div class="prop" onclick="selectProp(\'' + p.id + '\')">' +
       "<div><strong>" + p.city + " — " + p.hood + "</strong> <span class='muted'>" + p.rooms + " חדרים · " + p.sqm + " מ״ר" + (p.live ? " · עוגן חי" : " · דמו") + (p.mine ? " · שלי (חסום למסחר)" : "") + "</span></div>" +
-      "<div><strong>" + fmt(pr) + "</strong> <span class='" + cls + "'>" + c + "</span></div></div>";
+      "<div><strong>" + fmt(impliedValue(p)) + "</strong> <span class='muted'>טוקן: " + fmt(pr) + "</span> <span class='" + cls + "'>" + c + "</span></div></div>";
   }).join("");
 }
 function renderAll(){ renderWallet(); renderList(); if(selected) selectProp(selected); }
@@ -254,21 +259,22 @@ function drawLayers(){
     const pr = price(p), c = chg(pr, p.anchor);
     const marker = L.marker([p.lat, p.lon]).bindPopup(
       "<strong>" + p.city + " — " + p.hood + "</strong><br>" + p.rooms + " חדרים · " + p.sqm + " מ״ר<br>" +
-      "מחיר חי: <strong>" + fmt(pr) + "</strong> (" + c + ")<br>" +
+      "מחיר טוקן: <strong>" + fmt(pr) + "</strong> · שווי משתמע: " + fmt(impliedValue(p)) + " (" + c + ")<br>" +
       "<button onclick=\"selectProp('" + p.id + "')\">סחור בדירה</button>");
     marker.addTo(layerPins);
     const col = pr > p.anchor ? "#1a5c2a" : pr < p.anchor ? "#a33" : "#888";
-    L.circleMarker([p.lat, p.lon], { radius: 14, color: col, fillColor: col, fillOpacity: 0.5 }).bindPopup(
-      "<strong>" + p.city + " — " + p.hood + "</strong><br>מחיר חי: " + fmt(pr) + " (" + c + ")").addTo(layerMovers);
+    L.circleMarker([p.lat, p.lon], { radius: 18, color: col, fillColor: col, fillOpacity: 0.8 }).bindPopup(
+      "<strong>" + p.city + " — " + p.hood + "</strong><br>מחיר טוקן: " + fmt(pr) + " · שווי משתמע: " + fmt(impliedValue(p)) + " (" + c + ")").addTo(layerMovers);
     if(!cities[p.city]) cities[p.city] = { anchors: [], lat: p.lat, lon: p.lon, n: 0 };
     cities[p.city].anchors.push(p.anchor); cities[p.city].n++;
   });
   Object.values(cities).forEach(c=>{
     const med = c.anchors.sort((a,b)=>a-b)[Math.floor(c.anchors.length/2)];
     const col = med > 3000000 ? "#a33" : med > 2000000 ? "#d88f00" : "#1a5c2a";
-    L.circle([c.lat, c.lon], { radius: 12000, color: col, fillColor: col, fillOpacity: 0.25 }).bindPopup(
+    L.circle([c.lat, c.lon], { radius: 25000, color: col, fillColor: col, fillOpacity: 0.4 }).bindPopup(
       "חציון עוגנים (דמו): " + fmt(med) + " · " + c.n + " דירות").addTo(layerHeat);
   });
+  updateLayerStatus();
 }
 function setLayer(name){
   currentLayer = name;
@@ -279,6 +285,13 @@ function setLayer(name){
   if(name==="pins") map.addLayer(layerPins);
   if(name==="heat") map.addLayer(layerHeat);
   if(name==="movers") map.addLayer(layerMovers);
+  updateLayerStatus();
+}
+function updateLayerStatus(){
+  const el = document.getElementById("layerStatus"); if(!el) return;
+  if(currentLayer === "pins") el.textContent = "מוצגות: " + S.props.length + " דירות רשומות (סיכות).";
+  if(currentLayer === "heat") el.textContent = "מוצג: חום מחירים לפי עיר (מעגלים צבעוניים — אדום יקר, ירוק זול).";
+  if(currentLayer === "movers") el.textContent = "מוצגים: עולים (ירוק) ויורדים (אדום) מול העוגן.";
 }
 async function registerProperty(tryLive){
   const city = document.getElementById("regCity").value.trim();
@@ -289,7 +302,7 @@ async function registerProperty(tryLive){
   const manual = parseInt(document.getElementById("regAnchor").value, 10) || null;
   const msg = document.getElementById("regMsg");
   if(!city || !street){ msg.innerHTML = '<span class="error">חובה למלא עיר ורחוב.</span>'; return; }
-  let anchor = null, live = false;
+  let anchor = null, live = false, fetchFailed = false;
   if(tryLive){
     msg.textContent = "מנסה להביא עוגן חי מהמנוע…";
     try{
@@ -304,10 +317,15 @@ async function registerProperty(tryLive){
         anchor = Math.round(pps[Math.floor(pps.length/2)] * sqm);
         live = true;
       }
-    }catch(e){ /* נופלים למחיר ידני */ }
+    }catch(e){ fetchFailed = true; }
   }
   if(!anchor){
-    if(!manual){ msg.innerHTML = '<span class="error">לא הצלחנו להביא עוגן חי (הדפדפן חסם את הקריאה או שאין עסקאות דומות) — הזינו מחיר פתיחה ידני, או נסו שוב.</span>'; return; }
+    if(!manual){
+      msg.innerHTML = fetchFailed
+        ? '<span class="error">הדפדפן חסם את הקריאה למאגר העסקאות (CORS) — בדמו הסטטי אין כרגע עוגן חי. הזינו מחיר פתיחה ידני ולחצו "רשום עם מחיר ידני (דמו)".</span>'
+        : '<span class="error">לא נמצאו עסקאות דומות מספיק — הזינו מחיר פתיחה ידני, או נסו עיר/רחוב אחרים.</span>';
+      return;
+    }
     anchor = manual;
   }
   const id = "user-" + Date.now();
