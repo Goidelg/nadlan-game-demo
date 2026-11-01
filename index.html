@@ -210,13 +210,13 @@ function selectProp(id){
   document.getElementById("posLine").textContent =
     "הפוזיציה שלך: לונג " + pos.long + " · שורט " + pos.short +
     " · הצטבר לבעלים מעמלות (דמו): " + fmtPts(p.ownerFees);
-  const hist = p.hist.length > 1 ? p.hist : [{ t: 0, price: p.anchor }, { t: 1, price: price(p) }];
+  const hist = p.hist.length > 1 ? p.hist : [{ t: 0, price: p.anchor / SUPPLY }, { t: 1, price: price(p) }];
   const w = 560, h = 60, vals = hist.map(x=>x.price);
   const mn = Math.min(...vals), mx = Math.max(...vals), rg = (mx - mn) || 1;
   const pts = vals.map((v, i)=> (i/(vals.length-1))*w + "," + (h - 6 - ((v-mn)/rg)*(h-12))).join(" ");
   document.getElementById("spark").innerHTML =
     '<svg width="100%" viewBox="0 0 ' + w + ' ' + h + '" style="background:#f6f4ef;border-radius:8px"><polyline points="' + pts + '" fill="none" stroke="#1a5c2a" stroke-width="2"/></svg>' +
-    '<p class="muted small">גרף מחיר הטוקן (דמו) — שינוי מול העוגן: ' + chg(price(p), p.anchor) + " · מול השיא: " + chg(price(p), Math.round(p.anchor*(1+STEP*p.peak))) + "</p>";
+    '<p class="muted small">גרף מחיר הטוקן (דמו) — שינוי מול העוגן: ' + chg(impliedValue(p), p.anchor) + " · מול השיא: " + chg(impliedValue(p), Math.round(p.anchor*(1+STEP*p.peak))) + "</p>";
   document.getElementById("tradeCard").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function chg(a, b){ const d = Math.round((a-b)/b*1000)/10; return (d>=0?"+":"") + d + "%"; }
@@ -227,8 +227,8 @@ function renderWallet(){
 function renderList(){
   const el = document.getElementById("plist");
   el.innerHTML = S.props.map(p=>{
-    const pr = price(p), c = chg(pr, p.anchor);
-    const cls = pr > p.anchor ? "up" : pr < p.anchor ? "down" : "muted";
+    const pr = price(p), iv = impliedValue(p), c = chg(iv, p.anchor);
+    const cls = iv > p.anchor ? "up" : iv < p.anchor ? "down" : "muted";
     return '<div class="prop" onclick="selectProp(\'' + p.id + '\')">' +
       "<div><strong>" + p.city + " — " + p.hood + "</strong> <span class='muted'>" + p.rooms + " חדרים · " + p.sqm + " מ״ר" + (p.live ? " · עוגן חי" : " · דמו") + (p.mine ? " · שלי (חסום למסחר)" : "") + "</span></div>" +
       "<div><strong>" + fmt(impliedValue(p)) + "</strong> <span class='muted'>טוקן: " + fmt(pr) + "</span> <span class='" + cls + "'>" + c + "</span></div></div>";
@@ -236,15 +236,17 @@ function renderList(){
 }
 function renderAll(){ renderWallet(); renderList(); if(selected) selectProp(selected); }
 function resetGame(){
-  if(!confirm("לאפס את המשחק? כל הנקודות והפוזיציות יימחקו.")) return;
-  localStorage.removeItem(LS); load(); selected = null;
+  if(!confirm("לאפס את המשחק? כל הנקודות, הפוזיציות והדירות שרשמת יימחקו.")) return;
+  localStorage.removeItem(LS);
+  S = { points: START_POINTS, props: SEED.map(p=>({...p, hist:[], live:false, mine:false, ownerFees:0})), pos: {}, trades: 0 };
+  save(); selected = null;
   document.getElementById("tradeCard").style.display = "none";
   renderAll(); drawLayers();
 }
 </script>
 <script>
 function initMap(){
-  map = L.map("map").setView([31.6, 34.9], 7);
+  map = L.map("map", { scrollWheelZoom: false }).setView([31.6, 34.9], 7);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
   layerPins = L.layerGroup().addTo(map);
   layerHeat = L.layerGroup();
@@ -256,13 +258,13 @@ function drawLayers(){
   layerPins.clearLayers(); layerHeat.clearLayers(); layerMovers.clearLayers();
   const cities = {};
   S.props.forEach(p=>{
-    const pr = price(p), c = chg(pr, p.anchor);
+    const pr = price(p), iv = impliedValue(p), c = chg(iv, p.anchor);
     const marker = L.marker([p.lat, p.lon]).bindPopup(
       "<strong>" + p.city + " — " + p.hood + "</strong><br>" + p.rooms + " חדרים · " + p.sqm + " מ״ר<br>" +
       "מחיר טוקן: <strong>" + fmt(pr) + "</strong> · שווי משתמע: " + fmt(impliedValue(p)) + " (" + c + ")<br>" +
       "<button onclick=\"selectProp('" + p.id + "')\">סחור בדירה</button>");
     marker.addTo(layerPins);
-    const col = pr > p.anchor ? "#1a5c2a" : pr < p.anchor ? "#a33" : "#888";
+    const col = iv > p.anchor ? "#1a5c2a" : iv < p.anchor ? "#a33" : "#888";
     L.circleMarker([p.lat, p.lon], { radius: 18, color: col, fillColor: col, fillOpacity: 0.8 }).bindPopup(
       "<strong>" + p.city + " — " + p.hood + "</strong><br>מחיר טוקן: " + fmt(pr) + " · שווי משתמע: " + fmt(impliedValue(p)) + " (" + c + ")").addTo(layerMovers);
     if(!cities[p.city]) cities[p.city] = { anchors: [], lat: p.lat, lon: p.lon, n: 0 };
