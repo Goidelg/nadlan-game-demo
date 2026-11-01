@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מחיר חי — משחק חיזוי מחירי דירות (דמו)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;background:#f6f4ef;color:#1c1a17;line-height:1.6}
+header{background:#1c1a17;color:#fff;padding:20px 16px}
+header h1{margin:0;font-size:1.8rem}
+header p{margin:4px 0 0;color:#cfc8b8}
+.banner{background:#fff3cd;border:1px solid #f0dfa8;padding:10px 16px;font-weight:600;text-align:center}
+main{max-width:1020px;margin:0 auto;padding:16px}
+.card{background:#fff;border:1px solid #e3ded2;border-radius:14px;padding:16px;margin-bottom:16px}
+.wallet{display:flex;gap:24px;flex-wrap:wrap;align-items:center}
+.wallet strong{font-size:1.3rem}
+button{font:inherit;font-weight:700;background:#1c1a17;color:#fff;border:0;border-radius:10px;padding:10px 18px;cursor:pointer}
+button.secondary{background:#fff;color:#1c1a17;border:1px solid #cfc8b8}
+button:disabled{opacity:.45;cursor:default}
+input,select{font:inherit;padding:9px 11px;border:1px solid #cfc8b8;border-radius:8px;width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+label{display:flex;flex-direction:column;font-size:.9rem;font-weight:600;gap:4px}
+#map{height:420px;border-radius:12px;border:1px solid #e3ded2}
+.layers{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.layers button.active{background:#1a5c2a}
+.prop{display:flex;justify-content:space-between;gap:12px;align-items:center;border-bottom:1px solid #eee7d8;padding:10px 0;cursor:pointer}
+.prop:last-child{border-bottom:0}
+.prop:hover{background:#faf8f3}
+.up{color:#1a5c2a;font-weight:700}
+.down{color:#a33;font-weight:700}
+.muted{color:#5c5648;font-size:.9rem}
+.tradebox{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:12px}
+.receipt{background:#f6f4ef;border-radius:10px;padding:12px;margin-top:12px}
+.error{color:#a33;font-weight:600}
+.small{font-size:.88rem}
+footer{color:#5c5648;font-size:.88rem;padding:0 16px 40px;max-width:1020px;margin:0 auto}
+</style>
+</head>
+<body>
+<header>
+<h1>מחיר חי <span style="font-size:1rem;font-weight:400;color:#cfc8b8">(דמו)</span></h1>
+<p>כל דירה מקבלת מחיר חי. אתם קובעים אותו — שורט או לונג, ובכמה.</p>
+</header>
+<div class="banner">דמו בלבד — נקודות משחק, לא כסף. מחירי הפתיחה הם נתוני דמו לדוגמה, לא מחירי אמת (אלא אם כתוב "עוגן חי מהמנוע").</div>
+<main>
+<section class="card wallet">
+<div>הנקודות שלי: <strong id="points">—</strong></div>
+<div class="muted" id="stats"></div>
+<button class="secondary" onclick="resetGame()">איפוס משחק</button>
+</section>
+
+<section class="card">
+<h2 style="margin-top:0">מפת ישראל — איפה המחיר עולה, איפה יורד</h2>
+<div class="layers">
+<button id="layerPins" class="active" onclick="setLayer('pins')">דירות רשומות</button>
+<button id="layerHeat" onclick="setLayer('heat')">מפת חום מחירים</button>
+<button id="layerMovers" onclick="setLayer('movers')">עולים / יורדים</button>
+</div>
+<div id="map"></div>
+<p class="muted small">סיכות הדמו ממוקמות ברמת שכונה, לא בכתובת מדויקת — זה כלל הפרטיות של המוצר. סיכה מדויקת תופיע רק בהסכמה מפורשת של בעל הנכס.</p>
+</section>
+
+<section class="card">
+<h2 style="margin-top:0">דירות במשחק — לחצו לדירה כדי לסחור בה</h2>
+<div id="plist"></div>
+</section>
+
+<section class="card" id="tradeCard" style="display:none">
+<h2 style="margin-top:0" id="tradeTitle"></h2>
+<p class="muted" id="tradeMeta"></p>
+<div id="spark"></div>
+<div class="tradebox">
+<label>כמות טוקנים (מקסימום 100 לדירה)
+<input id="qty" type="number" min="1" max="100" value="10">
+</label>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+<button onclick="doTrade('buy')">קנה (לונג)</button>
+<button onclick="doTrade('sell')">מכור (סגור לונג)</button>
+<button onclick="doTrade('short')">שורט (מכור בחסר)</button>
+<button onclick="doTrade('cover')">סגור שורט</button>
+</div>
+<div class="receipt" id="receipt"></div>
+<p class="muted small" id="posLine"></p>
+</section>
+
+<section class="card">
+<h2 style="margin-top:0">רשמו דירה למשחק</h2>
+<p class="muted">הדירה שלכם מקבלת 1,000 טוקנים ומחיר פתיחה. <strong>מי שרושם דירה לא יכול לסחור בה</strong> — הוא הבעלים, והוא אינסיידר. הוא כן מקבל 30% מעמלות המסחר בדירה שלו (בדמו: נצבר לתצוגה בלבד).</p>
+<div class="grid">
+<label>עיר<input id="regCity" placeholder="תל אביב-יפו"></label>
+<label>רחוב<input id="regStreet" placeholder="רוטשילד"></label>
+<label>מספר בית<input id="regNum" placeholder="10"></label>
+<label>חדרים<input id="regRooms" type="number" placeholder="4"></label>
+<label>שטח (מ"ר)<input id="regSqm" type="number" placeholder="95"></label>
+<label>מחיר פתיחה ידני (₪) — רק אם אין עוגן חי<input id="regAnchor" type="number" placeholder="3000000"></label>
+</div>
+<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+<button onclick="registerProperty(true)">רשום ונסה עוגן חי מהמנוע</button>
+<button class="secondary" onclick="registerProperty(false)">רשום עם מחיר ידני (דמו)</button>
+</div>
+<p id="regMsg" class="muted"></p>
+</section>
+
+<section class="card">
+<h2 style="margin-top:0">איך זה עובד</h2>
+<ul>
+<li><strong>1,000 טוקנים לדירה, לא יותר.</strong> מחיר הטוקן מתחיל בעוגן, וכל קנייה מעלה אותו: מחיר = עוגן × (1 + 0.001 × טוקנים שנמכרו נטו). רוצה לקנות? אתה מעלה את המחיר.</li>
+<li><strong>שורט</strong> = מכירת טוקנים שאין לך. אם המחיר יורד — הרווחת. מוגבל ל־100 טוקנים לדירה, כמו לונג.</li>
+<li><strong>עמלה 1%</strong> על כל עסקה: 50% פלטפורמה, 30% בעל הנכס, 20% קרן נזילות.</li>
+<li><strong>יישוב:</strong> כשהדירה נמכרת באמת, כל טוקן משלם את מחיר המכירה. בינתיים אין תפוגה — זה ה־perpetual.</li>
+<li><strong>המודל העסקי:</strong> המשחק אוסף דאטה — מה הקהל חשב שדירה שווה, בכל רגע, לפני המכירה. הדאטה הזו (קהל מול מנוע מול מציאות) היא הנכס שמממן את האתר.</li>
+</ul>
+<details><summary>מה דמו כאן ומה אמיתי</summary>
+<p class="small">המנגנון (עקומה, שורט, עמלות, עצירת מסחר) אמיתי ועובד. מחירי הפתיחה של דירות הדמו הם דוגמה בלבד. רישום דירה מנסה להביא עוגן חי ממאגר העסקאות הפתוח (גרסאות לעם) — אם הדפדפן חוסם את הקריאה, תתבקשו להזין מחיר ידני. אין כאן כסף אמיתי, אין התחברות, והנקודות נשמרות רק בדפדפן שלכם.</p>
+</details>
+</section>
+</main>
+<footer>
+<p>מחיר חי — דמו. הערכה סטטיסטית בלבד, אינה שומה. מקור נתוני האמת: דיווחי עסקאות לרשות המסים, דרך מאגר גרסאות לעם (over.org.il), מעודכן עד אמצע ספטמבר 2026.</p>
+</footer>
+<script>
+const LS = "mh_v1";
+const START_POINTS = 100000;
+const SUPPLY = 1000, STEP = 0.001, FEE = 0.01, CAP = 100;
+
+// דירות דמו — מחירי פתיחה לדוגמה בלבד, מיקום ברמת שכונה
+const SEED = [
+{id:"ta-roth", city:"תל אביב-יפו", hood:"רוטשילד", rooms:4, sqm:105, anchor:4200000, n:180, peak:240, lat:32.065, lon:34.775},
+{id:"ta-flor", city:"תל אביב-יפו", hood:"פלורנטין", rooms:3, sqm:72, anchor:2900000, n:40, peak:140, lat:32.055, lon:34.765},
+{id:"ta-bavli", city:"תל אביב-יפו", hood:"בבלי", rooms:5, sqm:130, anchor:5800000, n:260, peak:260, lat:32.09, lon:34.79},
+{id:"jm-rehav", city:"ירושלים", hood:"רחביה", rooms:3, sqm:80, anchor:2700000, n:90, peak:90, lat:31.775, lon:35.215},
+{id:"jm-pisgat", city:"ירושלים", hood:"פסגת זאב", rooms:4, sqm:100, anchor:2200000, n:20, peak:110, lat:31.825, lon:35.24},
+{id:"ha-carmel", city:"חיפה", hood:"כרמל", rooms:4, sqm:110, anchor:1900000, n:150, peak:150, lat:32.805, lon:34.99},
+{id:"ha-neve", city:"חיפה", hood:"נווה שאנן", rooms:3, sqm:75, anchor:1300000, n:10, peak:60, lat:32.795, lon:35.01},
+{id:"bs-ramot", city:"באר שבע", hood:"רמות", rooms:4, sqm:105, anchor:1400000, n:70, peak:70, lat:31.28, lon:34.79},
+{id:"pt-em", city:"פתח תקווה", hood:"אם המושבות", rooms:4, sqm:100, anchor:2300000, n:110, peak:110, lat:32.09, lon:34.88},
+{id:"rl-shikma", city:"ראשון לציון", hood:"נאות שקמה", rooms:4, sqm:98, anchor:2100000, n:30, peak:90, lat:31.975, lon:34.79},
+{id:"nt-yamim", city:"נתניה", hood:"עיר ימים", rooms:4, sqm:108, anchor:2600000, n:200, peak:200, lat:32.29, lon:34.85},
+{id:"ash-afridar", city:"אשקלון", hood:"אפרידר", rooms:4, sqm:102, anchor:1500000, n:50, peak:50, lat:31.665, lon:34.56},
+];
+let S;
+function load(){
+  try{ S = JSON.parse(localStorage.getItem(LS)); }catch(e){ S = null; }
+  if(!S || !S.props){
+    S = { points: START_POINTS, props: SEED.map(p=>({...p, hist:[], live:false, mine:false, ownerFees:0})), pos: {}, trades: 0 };
+    save();
+  }
+}
+function save(){ localStorage.setItem(LS, JSON.stringify(S)); }
+function price(p){ return Math.round(p.anchor * (1 + STEP * p.n)); }
+function fmt(n){ return "₪" + Math.round(n).toLocaleString("he-IL"); }
+function prop(id){ return S.props.find(p=>p.id===id); }
+let selected = null, map, layerPins, layerHeat, layerMovers, currentLayer = "pins";
+</script>
+<script>
+function doTrade(kind){
+  const p = prop(selected); if(!p) return;
+  const qty = Math.max(1, Math.min(CAP, parseInt(document.getElementById("qty").value || "10", 10) || 10));
+  const pos = S.pos[p.id] || { long: 0, short: 0 };
+  const pr = price(p);
+  const notional = pr * qty, fee = Math.round(notional * FEE);
+  let msg = "", ok = true;
+  if(p.mine){ ok = false; msg = "אתה רשמת את הדירה הזו — אתה לא יכול לסחור בה. זה כלל האמון של המשחק."; }
+  else if(kind === "buy"){
+    if(pos.long + qty > CAP){ ok = false; msg = "מעל תקרת הפוזיציה: מקסימום 100 טוקנים לדירה."; }
+    else if(p.n + qty > SUPPLY){ ok = false; msg = "נגמר ההיצע הראשוני — אפשר לקנות רק ממי שמוכר (בדמו: ההיצע מלא)."; }
+    else if(S.points < notional + fee){ ok = false; msg = "אין מספיק נקודות (צריך " + fmt(notional + fee) + ")."; }
+    else { S.points -= notional + fee; pos.long += qty; p.n += qty; msg = "קנית " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmt(fee) + " (50% פלטפורמה, 30% בעלים, 20% קרן)."; }
+  } else if(kind === "sell"){
+    if(pos.long < qty){ ok = false; msg = "אין לך מספיק לונג למכור (" + pos.long + " בלבד)."; }
+    else { S.points += notional - fee; pos.long -= qty; p.n -= qty; msg = "מכרת " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmt(fee) + "."; }
+  } else if(kind === "short"){
+    if(pos.short + qty > CAP){ ok = false; msg = "מעל תקרת השורט: מקסימום 100 טוקנים לדירה."; }
+    else if(p.n - qty < -500){ ok = false; msg = "השורט חורג ממגבלת העקומה."; }
+    else { S.points += notional - fee; pos.short += qty; p.n -= qty; msg = "פתחת שורט על " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. אם המחיר יירד — תרוויח. עמלה: " + fmt(fee) + "."; }
+  } else if(kind === "cover"){
+    if(pos.short < qty){ ok = false; msg = "אין לך מספיק שורט לסגור (" + pos.short + " בלבד)."; }
+    else if(S.points < notional + fee){ ok = false; msg = "אין מספיק נקודות לסגירת השורט (צריך " + fmt(notional + fee) + ")."; }
+    else { S.points -= notional + fee; pos.short -= qty; p.n += qty; msg = "סגרת שורט על " + qty + " טוקנים ב־" + fmt(pr) + " ליחידה. עמלה: " + fmt(fee) + "."; }
+  }
+  if(ok){
+    p.peak = Math.max(p.peak, price(p));
+    p.hist.push({ t: Date.now(), price: price(p) });
+    if(p.hist.length > 60) p.hist.shift();
+    p.ownerFees += Math.round(fee * 0.3);
+    S.pos[p.id] = pos; S.trades++;
+    save(); renderAll(); drawLayers();
+  }
+  document.getElementById("receipt").innerHTML = ok ? msg : '<span class="error">' + msg + "</span>";
+}
+function selectProp(id){
+  selected = id;
+  const p = prop(id);
+  document.getElementById("tradeCard").style.display = "block";
+  document.getElementById("tradeTitle").textContent = p.city + " — " + p.hood + " (" + p.rooms + " חדרים, " + p.sqm + " מ״ר)";
+  document.getElementById("tradeMeta").textContent =
+    "מחיר חי: " + fmt(price(p)) + " · עוגן: " + fmt(p.anchor) + (p.live ? " (עוגן חי מהמנוע)" : " (דמו)") +
+    " · טוקנים שנמכרו נטו: " + p.n + " מתוך " + SUPPLY +
+    (p.mine ? " · דירה שרשמת — מסחר חסום" : "");
+  const pos = S.pos[id] || { long: 0, short: 0 };
+  document.getElementById("posLine").textContent =
+    "הפוזיציה שלך: לונג " + pos.long + " · שורט " + pos.short +
+    " · הצטבר לבעלים מעמלות (דמו): " + fmt(p.ownerFees);
+  const hist = p.hist.length > 1 ? p.hist : [{ t: 0, price: p.anchor }, { t: 1, price: price(p) }];
+  const w = 560, h = 60, vals = hist.map(x=>x.price);
+  const mn = Math.min(...vals), mx = Math.max(...vals), rg = (mx - mn) || 1;
+  const pts = vals.map((v, i)=> (i/(vals.length-1))*w + "," + (h - 6 - ((v-mn)/rg)*(h-12))).join(" ");
+  document.getElementById("spark").innerHTML =
+    '<svg width="100%" viewBox="0 0 ' + w + ' ' + h + '" style="background:#f6f4ef;border-radius:8px"><polyline points="' + pts + '" fill="none" stroke="#1a5c2a" stroke-width="2"/></svg>' +
+    '<p class="muted small">גרף מחיר הטוקן (דמו) — שינוי מול העוגן: ' + chg(price(p), p.anchor) + " · מול השיא: " + chg(price(p), Math.round(p.anchor*(1+STEP*p.peak))) + "</p>";
+  document.getElementById("tradeCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function chg(a, b){ const d = Math.round((a-b)/b*1000)/10; return (d>=0?"+":"") + d + "%"; }
+function renderWallet(){
+  document.getElementById("points").textContent = fmt(S.points);
+  document.getElementById("stats").textContent = "עסקאות שביצעת: " + S.trades + " · דירות במשחק: " + S.props.length;
+}
+function renderList(){
+  const el = document.getElementById("plist");
+  el.innerHTML = S.props.map(p=>{
+    const pr = price(p), c = chg(pr, p.anchor);
+    const cls = pr > p.anchor ? "up" : pr < p.anchor ? "down" : "muted";
+    return '<div class="prop" onclick="selectProp(\'' + p.id + '\')">' +
+      "<div><strong>" + p.city + " — " + p.hood + "</strong> <span class='muted'>" + p.rooms + " חדרים · " + p.sqm + " מ״ר" + (p.live ? " · עוגן חי" : " · דמו") + (p.mine ? " · שלי (חסום למסחר)" : "") + "</span></div>" +
+      "<div><strong>" + fmt(pr) + "</strong> <span class='" + cls + "'>" + c + "</span></div></div>";
+  }).join("");
+}
+function renderAll(){ renderWallet(); renderList(); if(selected) selectProp(selected); }
+function resetGame(){
+  if(!confirm("לאפס את המשחק? כל הנקודות והפוזיציות יימחקו.")) return;
+  localStorage.removeItem(LS); load(); selected = null;
+  document.getElementById("tradeCard").style.display = "none";
+  renderAll(); drawLayers();
+}
+</script>
+<script>
+function initMap(){
+  map = L.map("map").setView([31.6, 34.9], 7);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+  layerPins = L.layerGroup().addTo(map);
+  layerHeat = L.layerGroup();
+  layerMovers = L.layerGroup();
+  drawLayers();
+}
+function drawLayers(){
+  if(!map) return;
+  layerPins.clearLayers(); layerHeat.clearLayers(); layerMovers.clearLayers();
+  const cities = {};
+  S.props.forEach(p=>{
+    const pr = price(p), c = chg(pr, p.anchor);
+    const marker = L.marker([p.lat, p.lon]).bindPopup(
+      "<strong>" + p.city + " — " + p.hood + "</strong><br>" + p.rooms + " חדרים · " + p.sqm + " מ״ר<br>" +
+      "מחיר חי: <strong>" + fmt(pr) + "</strong> (" + c + ")<br>" +
+      "<button onclick=\"selectProp('" + p.id + "')\">סחור בדירה</button>");
+    marker.addTo(layerPins);
+    const col = pr > p.anchor ? "#1a5c2a" : pr < p.anchor ? "#a33" : "#888";
+    L.circleMarker([p.lat, p.lon], { radius: 14, color: col, fillColor: col, fillOpacity: 0.5 }).bindPopup(
+      "<strong>" + p.city + " — " + p.hood + "</strong><br>מחיר חי: " + fmt(pr) + " (" + c + ")").addTo(layerMovers);
+    if(!cities[p.city]) cities[p.city] = { anchors: [], lat: p.lat, lon: p.lon, n: 0 };
+    cities[p.city].anchors.push(p.anchor); cities[p.city].n++;
+  });
+  Object.values(cities).forEach(c=>{
+    const med = c.anchors.sort((a,b)=>a-b)[Math.floor(c.anchors.length/2)];
+    const col = med > 3000000 ? "#a33" : med > 2000000 ? "#d88f00" : "#1a5c2a";
+    L.circle([c.lat, c.lon], { radius: 12000, color: col, fillColor: col, fillOpacity: 0.25 }).bindPopup(
+      "חציון עוגנים (דמו): " + fmt(med) + " · " + c.n + " דירות").addTo(layerHeat);
+  });
+}
+function setLayer(name){
+  currentLayer = name;
+  ["Pins","Heat","Movers"].forEach(k=>{
+    document.getElementById("layer"+k).classList.toggle("active", ("pins"===name&&k==="Pins")||("heat"===name&&k==="Heat")||("movers"===name&&k==="Movers"));
+  });
+  map.removeLayer(layerPins); map.removeLayer(layerHeat); map.removeLayer(layerMovers);
+  if(name==="pins") map.addLayer(layerPins);
+  if(name==="heat") map.addLayer(layerHeat);
+  if(name==="movers") map.addLayer(layerMovers);
+}
+async function registerProperty(tryLive){
+  const city = document.getElementById("regCity").value.trim();
+  const street = document.getElementById("regStreet").value.trim();
+  const num = document.getElementById("regNum").value.trim();
+  const rooms = parseInt(document.getElementById("regRooms").value, 10) || null;
+  const sqm = parseInt(document.getElementById("regSqm").value, 10) || null;
+  const manual = parseInt(document.getElementById("regAnchor").value, 10) || null;
+  const msg = document.getElementById("regMsg");
+  if(!city || !street){ msg.innerHTML = '<span class="error">חובה למלא עיר ורחוב.</span>'; return; }
+  let anchor = null, live = false;
+  if(tryLive){
+    msg.textContent = "מנסה להביא עוגן חי מהמנוע…";
+    try{
+      const q = new URLSearchParams({ settlement: city, date_from: (new Date().getFullYear()-3)+"-01-01", sort: "date_desc", limit: "200" });
+      if(rooms){ q.set("min_rooms", String(rooms)); q.set("max_rooms", String(rooms)); }
+      const res = await fetch("https://www.over.org.il/api/deals/search?" + q, { signal: AbortSignal.timeout(12000) });
+      const data = await res.json();
+      const rows = (data.data || []).filter(r => r.addresses && r.addresses.join(" ").includes(street) && r.price_per_sqm_normalized > 0);
+      const pool = rows.length ? rows : (data.data || []).filter(r => r.price_per_sqm_normalized > 0);
+      if(pool.length && sqm){
+        const pps = pool.map(r=>r.price_per_sqm_normalized).sort((a,b)=>a-b);
+        anchor = Math.round(pps[Math.floor(pps.length/2)] * sqm);
+        live = true;
+      }
+    }catch(e){ /* נופלים למחיר ידני */ }
+  }
+  if(!anchor){
+    if(!manual){ msg.innerHTML = '<span class="error">לא הצלחנו להביא עוגן חי (הדפדפן חסם את הקריאה או שאין עסקאות דומות) — הזינו מחיר פתיחה ידני, או נסו שוב.</span>'; return; }
+    anchor = manual;
+  }
+  const id = "user-" + Date.now();
+  S.props.push({ id, city, hood: street + (num ? " " + num : ""), rooms: rooms || 4, sqm: sqm || 90, anchor, n: 0, peak: 0, lat: 31.6 + (Math.random()-0.5)*1.4, lon: 34.9 + (Math.random()-0.5)*1.2, hist: [], live, mine: true, ownerFees: 0 });
+  save();
+  msg.textContent = live
+    ? "הדירה נרשמה עם עוגן חי מהמנוע: " + fmt(anchor) + ". שים לב: אתה לא יכול לסחור בה — אתה הבעלים."
+    : "הדירה נרשמה עם מחיר ידני (דמו): " + fmt(anchor) + ". שים לב: אתה לא יכול לסחור בה — אתה הבעלים.";
+  renderAll(); drawLayers();
+  document.getElementById("plist").scrollIntoView({ behavior: "smooth" });
+}
+load(); renderAll(); initMap();
+</script>
+</body>
+</html>
